@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
-	"strconv"
-	"strings"
 )
 
 // Migration represents a single migration for a database
@@ -15,16 +13,21 @@ type Migration struct {
 	Content string // The actual 'code' of the migration i.e. SQL
 }
 
+// FilterFn is called by the loader to parse out migration information
+// if a non-nil value is return the loader will also read the file contents
+type FilterFn func(filename string) *Migration
+
 // Loader provides configurable migration loading functionality
 type Loader struct {
 	migrations []Migration
-	format     string
+	filter     FilterFn
 }
 
-func NewLoader() Loader {
+// NewLoader create a new Loader instance
+func NewLoader(filter FilterFn) Loader {
 	return Loader{
-		make([]Migration, 0),
-		format: "",
+		migrations: make([]Migration, 0),
+		filter:     filter,
 	}
 }
 
@@ -50,60 +53,19 @@ func (l *Loader) FromFS(afs fs.FS) error {
 			continue
 		}
 
-		m, err := l.parseMigrationFile(afs, file)
-		if err != nil {
-			return err
-		}
+		filename := file.Name()
 
+		m := l.filter(filename)
 		if m != nil {
-			migrations = append(migrations, *m)
+			migrationSQL, err := fs.ReadFile(afs, filename)
+			if err != nil {
+				return fmt.Errorf("failed to read migration file (%s): %w", filename, err)
+			}
+			m.Content = string(migrationSQL)
+
+			l.migrations = append(l.migrations, *m)
 		}
 	}
 
 	return nil
-}
-
-func (l *Loader) parseMigrationFile(afs fs.FS, file fs.DirEntry) (m *Migration, err error) {
-	// File name format: <id>_<name>.sql
-	fileName := file.Name()
-
-	// Ignore non sql files
-	if !strings.HasSuffix(fileName, ".sql") {
-		return
-	}
-
-	// Ignore fixture files
-	if strings.HasSuffix(fileName, ".fixture.sql") {
-		return
-	}
-
-	fileName = strings.TrimSuffix(fileName, ".sql")
-
-	m = &Migration{}
-
-	// Find the first underscore to separate the ID from the name
-	underscoreIndex := strings.Index(fileName, "_")
-	if underscoreIndex == -1 {
-		return m, fmt.Errorf("invalid migration file name format for file: %s, (the format is <id>_<name>.sql)", fileName)
-	}
-
-	versionStr := fileName[:underscoreIndex]
-	m.Name = fileName[underscoreIndex+1:]
-
-	m.Version, err = strconv.Atoi(versionStr)
-	if err != nil {
-		return m, fmt.Errorf("failed to parse migration file version (%s): %w", fileName, err)
-	}
-
-	if m.Version <= 0 {
-		return m, fmt.Errorf("migration file version cannot be <= 0: %s", fileName)
-	}
-
-	migrationSQL, err := fs.ReadFile(afs, fileName+".sql")
-	if err != nil {
-		return m, fmt.Errorf("failed to read migration file (%s): %w", fileName, err)
-	}
-	m.Content = string(migrationSQL)
-
-	return m, nil
 }
