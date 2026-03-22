@@ -11,7 +11,7 @@ import (
 
 var (
 	ErrLocked          = errors.New("lock already acquired")
-	ErrNonOwnerRelease = errors.New("trying to release lock with acquiring it first")
+	ErrNonOwnerRelease = errors.New("trying to release lock without acquiring it first")
 )
 
 // DLock interface definining a locking mechanism interface
