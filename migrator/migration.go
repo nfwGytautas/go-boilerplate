@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"sort"
 )
 
 // Migration represents a single migration for a database
@@ -21,6 +22,7 @@ type FilterFn func(filename string) *Migration
 type Loader struct {
 	migrations []Migration
 	filter     FilterFn
+	err        error
 }
 
 // NewLoader create a new Loader instance
@@ -28,24 +30,30 @@ func NewLoader(filter FilterFn) Loader {
 	return Loader{
 		migrations: make([]Migration, 0),
 		filter:     filter,
+		err:        nil,
 	}
 }
 
 // FromDirectory read the specified directory for migrations and load them into the internal buffer
-func (l *Loader) FromDirectory(dir string) error {
+func (l *Loader) FromDirectory(dir string) *Loader {
 	dirFS := os.DirFS(dir)
 	return l.FromFS(dirFS)
 }
 
 // FromFS loads the migrations from an embedded filesystem, does not recurse into subdirectories
-func (l *Loader) FromFS(afs fs.FS) error {
+func (l *Loader) FromFS(afs fs.FS) *Loader {
+	if l.err != nil {
+		return l
+	}
+
 	files, err := fs.ReadDir(afs, ".")
 	if err != nil {
-		return fmt.Errorf("failed to read directory: %w", err)
+		l.err = fmt.Errorf("failed to read directory: %w", err)
+		return l
 	}
 
 	if len(files) == 0 {
-		return nil
+		return l
 	}
 
 	for _, file := range files {
@@ -59,7 +67,8 @@ func (l *Loader) FromFS(afs fs.FS) error {
 		if m != nil {
 			migrationSQL, err := fs.ReadFile(afs, filename)
 			if err != nil {
-				return fmt.Errorf("failed to read migration file (%s): %w", filename, err)
+				l.err = fmt.Errorf("failed to read migration file (%s): %w", filename, err)
+				return l
 			}
 			m.Content = string(migrationSQL)
 
@@ -67,5 +76,15 @@ func (l *Loader) FromFS(afs fs.FS) error {
 		}
 	}
 
-	return nil
+	return l
+}
+
+// Result return the loaded migrations and an error if it occured
+func (l *Loader) Result() ([]Migration, error) {
+	// Sort the migrations by their version
+	sort.Slice(l.migrations, func(i, j int) bool {
+		return l.migrations[i].Version < l.migrations[j].Version
+	})
+
+	return l.migrations, l.err
 }

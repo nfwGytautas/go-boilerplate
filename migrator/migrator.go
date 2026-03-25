@@ -4,5 +4,9 @@
 // keeps it in sync, either way its up to the end user to do as they please
 package migrator
 
+import "context"
+
 // Migrator interface allows for generic migration application
-type Migrator interface{}
+type Migrator interface {
+	Apply(ctx context.Context, migrations []Migration) error
+}
